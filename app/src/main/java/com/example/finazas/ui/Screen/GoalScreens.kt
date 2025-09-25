@@ -14,16 +14,11 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
-import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Menu
-import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.outlined.Add
-import androidx.compose.material.icons.outlined.Flag
-import androidx.compose.material.icons.outlined.Home
-import androidx.compose.material.icons.outlined.ListAlt
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.runtime.getValue
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -39,25 +34,16 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-
-import androidx.compose.runtime.saveable.rememberSaveable
+import kotlinx.coroutines.launch
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import androidx.navigation.NavController
-import androidx.navigation.NavDestination.Companion.hierarchy
-import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavHostController
-import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 
 // VM + Entity (ajusta paquetes)
 import com.example.finazas.ui.goals.GoalViewModel
 import com.example.finazas.data.local.entity.Goal
 import com.example.finazas.navigation.AppRoute
-import com.example.finazas.navigation.BottomBar
-
-// Tu bottom bar y colores/estilos (ajusta paquetes según tu proyecto)
-
 
 /* ----------------------------- THEME ----------------------------- */
 private val DarkBg = Color(0xFF0E0F11)
@@ -66,8 +52,6 @@ private val TextOnDark = Color(0xFFECECEC)
 private val Accent = Color(0xFFFFA726)
 private val Success = Color(0xFF22C55E)
 private val Subtle = Color(0xFFB9BEC5)
-
-
 
 /* ------------------------------ APP WRAPPER ----------------------------- */
 @Composable
@@ -86,7 +70,7 @@ fun MetasApp() {
         Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
             MetasScreen(
                 navController = nav,
-                onOpenDrawer = { /* no-op aquí */ }
+                onOpenDrawer = { /* no-op */ }
             )
         }
     }
@@ -137,12 +121,9 @@ fun MetasScreen(
     onOpenDrawer: () -> Unit,
     goalsVm: GoalViewModel = viewModel()
 ) {
-
     val goals by goalsVm.goals.collectAsStateWithLifecycle()
-
-    // Meta seleccionada (persistente en recomposiciones)
     var selectedId by rememberSaveable { mutableStateOf<Long?>(null) }
-    // Si no hay selección pero sí hay datos, selecciona la primera
+
     LaunchedEffect(goals) {
         if (selectedId == null && goals.isNotEmpty()) selectedId = goals.first().id
         if (goals.none { it.id == selectedId }) selectedId = goals.firstOrNull()?.id
@@ -154,25 +135,31 @@ fun MetasScreen(
     val selectedGoal = goals.firstOrNull { it.id == selectedId }
     val canGoBack = navController.previousBackStackEntry != null
 
+    // --- Dialog agregar monto ---
+    var showAddDialog by rememberSaveable { mutableStateOf(false) }
+
+    // Snackbar
+    val snackbarHostState = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
+
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text("Metas de ahorro", fontWeight = FontWeight.SemiBold) },
                 navigationIcon = {
-
                     if (canGoBack) {
                         IconButton(onClick = { navController.navigateUp() }) {
                             Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Atrás")
                         }
                     } else {
-                        // Pantalla top-level: no hay back; abrimos el drawer
                         IconButton(onClick = onOpenDrawer) {
                             Icon(Icons.Default.Menu, contentDescription = "Menú")
                         }
                     }
                 }
             )
-        }
+        },
+        snackbarHost = { SnackbarHost(snackbarHostState) }
     ) { inner ->
         Column(
             Modifier
@@ -204,7 +191,7 @@ fun MetasScreen(
 
             Spacer(Modifier.height(14.dp))
             AddNewGoal(onClick = {
-                navController.navigate(AppRoute.Pruebas.route) { // <- ir al CRUD
+                navController.navigate(AppRoute.Pruebas.route) {
                     launchSingleTop = true
                     restoreState = true
                 }
@@ -212,7 +199,6 @@ fun MetasScreen(
 
             Spacer(Modifier.height(16.dp))
 
-            // Detalle de la meta seleccionada (solo si hay alguna)
             if (selectedGoal != null) {
                 GoalDetailCard(
                     title = selectedGoal.title,
@@ -220,12 +206,55 @@ fun MetasScreen(
                     targetText = "S/ ${"%.2f".format(selectedGoal.targetAmount/100.0)}",
                     percent = if (selectedGoal.targetAmount > 0)
                         (selectedGoal.currentAmount.toFloat() / selectedGoal.targetAmount.toFloat()).coerceIn(0f,1f)
-                    else 0f
+                    else 0f,
+                    onProgressClick = { showAddDialog = true } // <-- botón del aro
                 )
             } else if (tiles.isNotEmpty()) {
-                // fallback si por timing aún no hay selectedGoal consistente
-                GoalDetailCard(title = tiles.first().title, currentText = "--", targetText = "--", percent = tiles.first().progress)
+                GoalDetailCard(
+                    title = tiles.first().title,
+                    currentText = "--",
+                    targetText = "--",
+                    percent = tiles.first().progress,
+                    onProgressClick = { /* no-op si no hay meta */ }
+                )
             }
+        }
+
+        // --- Dialog Agregar Monto ---
+        if (showAddDialog && selectedGoal != null) {
+            AddAmountDialog(
+                title = "Agregar a «${selectedGoal.title}»",
+                onDismiss = { showAddDialog = false },
+                onConfirmAmount = { amountInSoles ->
+                    val centsToAdd = parseSolesToCents(amountInSoles)
+                    if (centsToAdd <= 0) {
+                        scope.launch {
+                            snackbarHostState.showSnackbar("Ingresa un monto válido mayor a 0")
+                        }
+                        return@AddAmountDialog
+                    }
+                    val newAmount = selectedGoal.currentAmount + centsToAdd
+                    val reached = newAmount >= selectedGoal.targetAmount
+
+                    // >>> Ajusta estos métodos a tu VM si tienen otro nombre <<<
+                    if (reached) {
+                        // Borra meta y felicita
+                        goalsVm.delete(selectedGoal.id)
+                        showAddDialog = false
+                        scope.launch {
+                            snackbarHostState.showSnackbar("Meta lograda, felicidades 🎉")
+                        }
+                    } else {
+                        goalsVm.updateGoalAmount(selectedGoal.id, newAmount)
+                        showAddDialog = false
+                        scope.launch {
+                            snackbarHostState.showSnackbar(
+                                "Se agregó S/ ${"%.2f".format(centsToAdd/100.0)} a la meta"
+                            )
+                        }
+                    }
+                }
+            )
         }
     }
 }
@@ -253,7 +282,6 @@ fun GoalTile(goal: GoalTileUi, onClick: () -> Unit) {
             Modifier.padding(12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // indicador cuadrado a la izquierda
             Box(
                 Modifier
                     .size(16.dp)
@@ -304,7 +332,8 @@ fun GoalDetailCard(
     title: String,
     currentText: String,
     targetText: String,
-    percent: Float
+    percent: Float,
+    onProgressClick: () -> Unit
 ) {
     Surface(
         modifier = Modifier
@@ -314,7 +343,6 @@ fun GoalDetailCard(
     ) {
         Column(Modifier.padding(14.dp)) {
 
-            /* Encabezado con icono cuadrado y badge de progreso */
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Box(
                     Modifier
@@ -324,7 +352,7 @@ fun GoalDetailCard(
                 )
                 Spacer(Modifier.width(10.dp))
                 Text(title, fontWeight = FontWeight.SemiBold, fontSize = 16.sp, modifier = Modifier.weight(1f))
-                ProgressBadge(percent = percent)
+                ProgressBadgeButton(percent = percent, onClick = onProgressClick) // <-- ahora botón
             }
 
             Spacer(Modifier.height(10.dp))
@@ -358,19 +386,18 @@ fun GoalDetailCard(
 }
 
 @Composable
-fun ProgressBadge(percent: Float) {
-    // pequeño anillo con porcentaje (ej. 75%)
+fun ProgressBadgeButton(percent: Float, onClick: () -> Unit) {
     Box(
         Modifier
             .size(44.dp)
-            .clip(CircleShape),
+            .clip(CircleShape)
+            .clickable(onClick = onClick), // <-- convierte en botón
         contentAlignment = Alignment.Center
     ) {
         Canvas(Modifier.fillMaxSize()) {
             val stroke = 6f
             val diameter = kotlin.math.min(size.width, size.height) - stroke
             val topLeft = androidx.compose.ui.geometry.Offset((size.width - diameter) / 2, (size.height - diameter) / 2)
-            // fondo
             drawArc(
                 color = Color(0x33FFFFFF),
                 startAngle = -90f,
@@ -380,7 +407,6 @@ fun ProgressBadge(percent: Float) {
                 size = androidx.compose.ui.geometry.Size(diameter, diameter),
                 topLeft = topLeft
             )
-            // progreso
             drawArc(
                 color = Accent,
                 startAngle = -90f,
@@ -406,7 +432,6 @@ fun BarsChart(
     maxBarHeight: Dp
 ) {
     Column {
-        // barras
         Row(
             Modifier
                 .fillMaxWidth()
@@ -427,7 +452,6 @@ fun BarsChart(
             }
         }
         Spacer(Modifier.height(6.dp))
-        // etiquetas
         Row(
             Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween
@@ -439,8 +463,68 @@ fun BarsChart(
     }
 }
 
+/* ----------------------------- DIALOG: AGREGAR MONTO --------------------------- */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun AddAmountDialog(
+    title: String,
+    onDismiss: () -> Unit,
+    onConfirmAmount: (String) -> Unit
+) {
+    var amount by rememberSaveable { mutableStateOf("") }
+    var error by rememberSaveable { mutableStateOf<String?>(null) }
 
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            Column {
+                OutlinedTextField(
+                    value = amount,
+                    onValueChange = {
+                        amount = it
+                        error = null
+                    },
+                    label = { Text("Monto a agregar (S/)") },
+                    placeholder = { Text("Ej: 50 o 50.75") },
+                    singleLine = true,
+                    isError = error != null
+                )
+                if (error != null) {
+                    Spacer(Modifier.height(6.dp))
+                    Text(error!!, color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                if (amount.isBlank()) {
+                    error = "Este campo es obligatorio"
+                } else {
+                    onConfirmAmount(amount)
+                }
+            }) { Text("Agregar") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancelar") }
+        }
+    )
+}
 
+/* ----------------------------- HELPERS --------------------------- */
+private fun parseSolesToCents(input: String): Int {
+    // Acepta "50", "50.5", "50,5", "S/ 50.75", "s/50,75"
+    val cleaned = input.lowercase()
+        .replace("s/", "")
+        .replace("s\\/", "")
+        .replace("soles", "")
+        .replace("sol", "")
+        .replace(" ", "")
+        .replace(",", ".")
+        .trim()
+    val value = cleaned.toDoubleOrNull() ?: return 0
+    return kotlin.math.round(value * 100).toInt()
+}
 
 /* ----------------------------- PREVIEW --------------------------- */
 @Preview(showBackground = true, backgroundColor = 0xFF0E0F11)

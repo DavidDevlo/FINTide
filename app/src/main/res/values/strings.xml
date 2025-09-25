@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">finazas</string>
+    <string name="default_web_client_id">103283921077141540083.apps.googleusercontent.com</string>
 </resources>

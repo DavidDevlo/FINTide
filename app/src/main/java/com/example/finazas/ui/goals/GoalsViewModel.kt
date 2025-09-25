@@ -129,6 +129,15 @@ class GoalViewModel(app: Application) : AndroidViewModel(app) {
         repo.delete(id) // soft delete
         if (editingId == id) startCreate()
     }
+    // ---------- Métodos añadidos para que compile el UI ----------
+    fun deleteGoal(id: Long) = delete(id)
+
+    fun updateGoalAmount(id: Long, newAmount: Long) = viewModelScope.launch {
+        // Actualiza el monto actual (en centavos)
+        repo.setAmount(id, newAmount)
+        // Nota: la lógica de "si llegó a 100% borrar" la maneja la UI.
+        // Si prefieres moverla aquí, avísame y la encapsulamos.
+    }
 
     // Helpers de conversión
     private fun parseMoneyToCents(text: String): Long? {

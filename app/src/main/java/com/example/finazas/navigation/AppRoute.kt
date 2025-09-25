@@ -21,4 +21,6 @@ sealed class AppRoute(val route: String) {
     }
 
     data object Subscriptions : AppRoute("subscriptions")
+
+    data object Onboarding : AppRoute("onboarding")
 }

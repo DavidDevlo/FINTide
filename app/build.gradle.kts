@@ -2,7 +2,7 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
-    alias(libs.plugins.ksp) // ← usa el alias del catálogo, ya no id("...")
+    alias(libs.plugins.ksp)
 
 }
 
@@ -88,4 +88,11 @@ dependencies {
     implementation("androidx.compose.material:material-icons-extended:1.7.0") // revisa la versión Compose que uses
     implementation("androidx.compose.material3:material3:1.2.1") // o la última disponible
     implementation(platform("androidx.compose:compose-bom:2024.10.00")) // BOM actual
+
+    implementation("androidx.credentials:credentials:1.3.0")
+    implementation("androidx.credentials:credentials-play-services-auth:1.3.0")
+    implementation("com.google.android.libraries.identity.googleid:googleid:1.1.0")
+    implementation("androidx.work:work-runtime-ktx:2.9.0")
+
+
 }

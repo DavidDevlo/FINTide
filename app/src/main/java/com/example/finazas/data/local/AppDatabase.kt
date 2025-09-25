@@ -11,17 +11,20 @@ import com.example.finazas.data.local.dao.GoalDao
 import com.example.finazas.data.local.dao.MovementDao
 import com.example.finazas.data.local.dao.PaymentCardDao
 import com.example.finazas.data.local.dao.SubscriptionDao
+import com.example.finazas.data.local.dao.UserDao
 import com.example.finazas.data.local.entity.Goal
 import com.example.finazas.data.local.entity.Movement
 import com.example.finazas.data.local.entity.PaymentCard
 import com.example.finazas.data.local.entity.Subscription
+import com.example.finazas.data.local.entity.User
 import com.example.finazas.data.repo.PaymentCardRepository
 
 @Database(entities = [Goal::class,
     Movement::class,
     Subscription::class,
-    PaymentCard::class
-                     ], version = 3)
+    PaymentCard::class,
+    User::class
+                     ], version = 5)
 abstract class AppDatabase : RoomDatabase() {
 
     abstract fun goalDao(): GoalDao
@@ -29,6 +32,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun subscriptionDao(): SubscriptionDao
 
     abstract fun paymentCardDao(): PaymentCardDao
+    abstract fun userDao(): UserDao
 
 
     companion object {

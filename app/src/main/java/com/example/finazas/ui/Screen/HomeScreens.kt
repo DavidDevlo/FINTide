@@ -36,6 +36,20 @@ import com.example.finazas.ui.model.GoalTileUi
 import com.example.finazas.ui.model.toTileUi
 import com.example.finazas.ui.model.toRowUi
 
+import androidx.compose.runtime.*
+import androidx.compose.ui.platform.LocalContext
+import androidx.room.Room
+import com.example.finazas.data.local.AppDatabase
+import com.example.finazas.data.local.entity.PaymentCard
+import com.example.finazas.ui.profile.CardsViewModel
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+
+
+
 /* ----------------------------- THEME ----------------------------- */
 private val DarkBg = Color(0xFF0E0F11)
 private val SurfaceGray = Color(0xFF2B2F35)
@@ -77,7 +91,8 @@ fun HomeScreen(
     navController: NavHostController,
     onOpenDrawer: () -> Unit,
     goalsVm: GoalViewModel = viewModel(),
-    movementsVm: MovementViewModel = viewModel()
+    movementsVm: MovementViewModel = viewModel(),
+    cardsVm: CardsViewModel = viewModel()     // ⬅️ añade es
 ) {
     // Datos reales
     val mvm: MovementViewModel = viewModel()
@@ -87,7 +102,7 @@ fun HomeScreen(
 
     val goalsEntity by goalsVm.goals.collectAsStateWithLifecycle()
     val movementsEntity by movementsVm.movements.collectAsStateWithLifecycle()
-
+    val cards by cardsVm.cards.collectAsStateWithLifecycle()
     // Mappers a modelos UI para los composables de abajo
     val goalsUi by remember(goalsEntity) {
         mutableStateOf(goalsEntity.map { it.toTileUi() })
@@ -130,12 +145,8 @@ fun HomeScreen(
             GreetingCard(username = "davidd")
             Spacer(Modifier.height(12.dp))
 
-            BalanceCarousel(
-                balances = listOf(6420.00, 4420.00),
-                dates = listOf("Martes, 11 Noviembre 2024", "21/08/2025"),
-                brands = listOf("PayPal", " "),
-                styles = listOf(BalanceStyle.ORANGE, BalanceStyle.WHITE)
-            )
+            HomeCardsCarousel(cards = cards, staticAmount = 6420.00) // el monto fijo que quieras
+
 
             Spacer(Modifier.height(10.dp))
             InOutSummary(income = incomeStr, outcome = outcomeStr)
@@ -217,33 +228,58 @@ fun GreetingCard(username: String) {
 enum class BalanceStyle { ORANGE, WHITE }
 
 @Composable
-fun BalanceCarousel(
-    balances: List<Double>,
-    dates: List<String>,
-    brands: List<String>,
-    styles: List<BalanceStyle>
-) {
+fun HomeCardsCarousel(cards: List<PaymentCard>, staticAmount: Double = 0.0) {
+    if (cards.isEmpty()) {
+        Text(
+            "Aún no has agregado tarjetas.",
+            color = Subtle,               // usa tu color ya definido en Home
+            modifier = Modifier.padding(16.dp)
+        )
+        return
+    }
+
+    // Orden: predeterminada primero, luego por última actualización/creación
+    val rows = remember(cards) {
+        cards.sortedWith(
+            compareByDescending<PaymentCard> { it.isDefault }
+                .thenByDescending { maxOf(it.updatedAt, it.createdAt) }
+        )
+    }
+
+    val sdf = remember { java.text.SimpleDateFormat("dd MMM yyyy", java.util.Locale("es", "PE")) }
     var page by remember { mutableStateOf(0) }
 
     Row(
-        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
+        Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
     ) {
-        styles.forEachIndexed { i, style ->
-            val amount = balances.getOrNull(i) ?: 0.0
-            val date = dates.getOrNull(i) ?: ""
-            val brand = brands.getOrNull(i) ?: ""
-
+        rows.forEachIndexed { i, card ->
             if (i > 0) Spacer(Modifier.width(14.dp))
+            val dateStr = sdf.format(java.util.Date(maxOf(card.updatedAt, card.createdAt)))
 
-            when (style) {
-                BalanceStyle.ORANGE -> BalanceCardOrange(amount, date, brand) { page = i }
-                BalanceStyle.WHITE -> BalanceCardWhite(amount, date) { page = i }
+            if (card.isDefault) {
+                // Naranja + marca visible
+                BalanceCardOrange(
+                    amount = staticAmount,
+                    date = dateStr,
+                    brand = card.brand
+                ) { page = i }
+            } else {
+                // Blanca (tu versión no muestra brand)
+                BalanceCardWhite(
+                    amount = staticAmount,
+                    date = dateStr
+                ) { page = i }
             }
         }
     }
+
     Spacer(Modifier.height(8.dp))
-    DotsIndicator(count = styles.size, selected = page)
+    DotsIndicator(count = rows.size, selected = page)
 }
+
+
 
 @Composable
 fun BalanceCardOrange(amount: Double, date: String, brand: String, onClick: () -> Unit) {

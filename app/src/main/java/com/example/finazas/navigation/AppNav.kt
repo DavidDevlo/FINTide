@@ -2,6 +2,7 @@ package com.example.finazas.navigation
 
 
 
+import android.content.Context
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -22,10 +23,13 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.snapshots.SnapshotApplyResult
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.compose.NavHost
@@ -34,35 +38,49 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import kotlinx.coroutines.launch
 import com.example.finazas.navigation.appGraph // si usas el builder externo
+import com.example.finazas.ui.Screen.OnboardingScreen
 import com.example.finazas.ui.navigation.CentralActionButton
 import com.example.finazas.ui.navigation.MovementActionHub
 import com.example.finazas.ui.theme.*
+import com.google.firebase.crashlytics.buildtools.reloc.com.google.common.graph.SuccessorsFunction
 
 // navigation/AppNav.kt
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AppNav(startDestination: String = AppRoute.Home.route) {
+fun AppNav(startDestination: String) {
     val nav = rememberNavController()
-    val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
-    val scope = rememberCoroutineScope()
+    val backStackEntry by nav.currentBackStackEntryAsState()
+    val isOnboarding = backStackEntry?.destination
+        ?.hierarchy
+        ?.any { it.route == AppRoute.Onboarding.route } == true
 
-    val onOpenDrawer: () -> Unit = { scope.launch { drawerState.open() } }
-
-    // estado del hub (botón verde)
+    // 👇 Estado para el hub del botón verde
     var showHub by rememberSaveable { mutableStateOf(false) }
 
     ModalNavigationDrawer(
-        drawerState = drawerState,
-        drawerContent = {
-            /* ... tu Drawer ... */
-        }
+        drawerState = rememberDrawerState(DrawerValue.Closed),
+        gesturesEnabled = !isOnboarding,
+        drawerContent = { if (!isOnboarding) { /* tu drawer */ } }
     ) {
         Scaffold(
-            bottomBar = { BottomBar(navController = nav) },
-            floatingActionButton = {
-                CentralActionButton(onClick = { showHub = true }) // botón verde centrado
+            bottomBar = {
+                if (!isOnboarding) {
+                    BottomBar(navController = nav)
+                }
             },
-            floatingActionButtonPosition = FabPosition.Center
+            // 👇 pinta el FAB SOLO si no estamos en Onboarding
+            floatingActionButton = {
+                if (!isOnboarding) {
+                    FloatingActionButton(
+                        onClick = { showHub = true },
+                        containerColor = Color.Green,           // tu verde (o el color que uses)
+                        contentColor = Color.Black
+                    ) {
+                        Icon(Icons.Rounded.Add, contentDescription = "Acciones")
+                    }
+                }
+            },
+            floatingActionButtonPosition = FabPosition.Center   // 👈 centrado sobre el bottom bar
         ) { innerPadding ->
             NavHost(
                 navController = nav,
@@ -71,39 +89,51 @@ fun AppNav(startDestination: String = AppRoute.Home.route) {
                     .fillMaxSize()
                     .padding(innerPadding)
             ) {
-                appGraph(nav, onOpenDrawer)
+                appGraph(nav, onOpenDrawer = { /* ... */ })
+
+                composable(AppRoute.Onboarding.route) {
+                    val ctx = LocalContext.current
+                    OnboardingScreen(
+                        onSkip = {
+                            markOnboardingDone(ctx)
+                            nav.navigate(AppRoute.Home.route) {
+                                popUpTo(0) { inclusive = true }
+                                launchSingleTop = true
+                                restoreState = true
+                            }
+                        },
+                        onFinish = {
+                            markOnboardingDone(ctx)
+                            nav.navigate(AppRoute.Home.route) {
+                                popUpTo(0) { inclusive = true }
+                                launchSingleTop = true
+                                restoreState = true
+                            }
+                        }
+                    )
+                }
             }
         }
     }
 
-    // HUB de acciones (Ingreso / Egreso / Suscripción)
-    if (showHub) {
+    // 👇 pinta el sheet del hub SOLO si no estamos en Onboarding
+    if (showHub && !isOnboarding) {
         ModalBottomSheet(
             onDismissRequest = { showHub = false },
             containerColor = MaterialTheme.colorScheme.surface
         ) {
             MovementActionHub(
                 onSelect = { action ->
-                    showHub = false // cierra el sheet primero
+                    showHub = false
                     when (action) {
-                        "Ingreso" -> {
-                            nav.navigate(AppRoute.MovementNew.withType("Ingreso")) {
-                                launchSingleTop = true
-                                restoreState = true
-                            }
+                        "Ingreso" -> nav.navigate(AppRoute.MovementNew.withType("Ingreso")) {
+                            launchSingleTop = true; restoreState = true
                         }
-                        "Suscripción" -> {
-                            nav.navigate(AppRoute.SubscriptionNew.create()) {
-                                launchSingleTop = true
-                                restoreState = true
-                            }
+                        "Suscripción" -> nav.navigate(AppRoute.SubscriptionNew.create()) {
+                            launchSingleTop = true; restoreState = true
                         }
-                        "Egreso" -> {
-                            // lleva a la LISTA de suscripciones/recibos
-                            nav.navigate(AppRoute.Subscriptions.route) {
-                                launchSingleTop = true
-                                restoreState = true
-                            }
+                        "Egreso" -> nav.navigate(AppRoute.Subscriptions.route) {
+                            launchSingleTop = true; restoreState = true
                         }
                     }
                 }
@@ -111,4 +141,13 @@ fun AppNav(startDestination: String = AppRoute.Home.route) {
         }
     }
 }
+
+// NO composable
+private fun markOnboardingDone(ctx: Context) {
+    ctx.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
+        .edit().putBoolean("onboarding_done", true).apply()
+}
+
+
+
 
